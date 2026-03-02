@@ -1,0 +1,64 @@
+#cloud-config
+autoinstall:
+  version: 1
+
+  interactive-sections:
+    - network
+    # - identity
+
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+
+  timezone: Europe/London
+
+  # network:    # comment out before handing off
+  #   version: 2
+  #   renderer: networkd
+
+  source:
+    id: ubuntu-server
+
+  identity:   # comment out before handing off if necessary
+    hostname: replace_me
+    username: replace_me
+    password: replace_me #user
+
+  ssh:
+    install-server: true
+    allow-pw: true
+    authorized-keys: []
+
+  apt:
+    preserve_sources_list: false
+    mirror-selection:
+      primary:
+        - country-mirror
+        - uri: "http://archive.ubuntu.com/ubuntu"
+          arches: [i386, amd64]
+        - uri: "http://ports.ubuntu.com/ubuntu-ports"
+          arches: [s390x, arm64, armhf, powerpc, ppc64el, riscv64]
+    fallback: abort
+    geoip: true
+
+  updates: security
+
+  storage:
+    layout: 
+      name: lvm
+      
+  packages:
+    - curl
+    - tar
+    # - unzip
+    # - git
+
+  # early-commands:
+
+  late-commands:
+    - cp /cdrom/postinstall/provision.sh /target/root/provision.sh
+    - cp /cdrom/postinstall/postinstall.service /target/etc/systemd/system/postinstall.service
+    - curtin in-target -- chmod +x /root/provision.sh
+    - curtin in-target -- systemctl enable postinstall.service
+  
+  shutdown: poweroff

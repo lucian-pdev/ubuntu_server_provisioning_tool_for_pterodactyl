@@ -1,0 +1,13 @@
+[Unit]
+Description=Run postinstall provisioning
+ConditionPathExists=/root/provision.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/provision.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
