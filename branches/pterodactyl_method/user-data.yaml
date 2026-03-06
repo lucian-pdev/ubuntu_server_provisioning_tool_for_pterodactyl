@@ -2,8 +2,8 @@
 autoinstall:
   version: 1
 
-  interactive-sections:
-    - network
+  interactive-sections: []
+    # - network
     # - identity
 
   locale: en_US.UTF-8
@@ -12,17 +12,21 @@ autoinstall:
 
   timezone: Europe/London
 
-  # network:    # comment out before handing off
+  # network:
   #   version: 2
-  #   renderer: networkd
+  #   ethernets:
+  #     enp0s3:  # or use match driver/name more carefully
+  #       dhcp4: true
+  #       dhcp-identifier: mac
+
 
   source:
     id: ubuntu-server
 
-  identity:   # comment out before handing off if necessary
-    hostname: replace_me
-    username: replace_me
-    password: replace_me #user
+  identity:
+    hostname: replace_me_hostname
+    username: replace_me_username
+    password: replace_me_password
 
   ssh:
     install-server: true
@@ -44,9 +48,13 @@ autoinstall:
   updates: security
 
   storage:
-    layout: 
+    layout:
       name: lvm
-      
+      match:
+        size: largest
+    swap:
+      size: 0
+
   packages:
     - curl
     - tar

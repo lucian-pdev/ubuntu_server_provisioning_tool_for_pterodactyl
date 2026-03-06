@@ -22,11 +22,20 @@ debuginfo(){
   echo "==================================================="
 }
 
-echo "==================================================="
-echo "==================================================="
-echo "The provisioning of pterodactyl is starting."
-echo "==================================================="
-echo "==================================================="
+finish_message() {
+  local msg=$1
+  echo "$msg"
+  echo "$msg" > /dev/tty1
+}
+
+msg="
+===================================================
+===================================================
+The provisioning of pterodactyl is starting. 1/14
+===================================================
+==================================================="
+
+finish_message "$msg"
 
 apt-get update
 apt-get install -y software-properties-common tar curl unzip apt-transport-https ca-certificates gnupg
@@ -34,7 +43,8 @@ sleep 2
 
 echo "==================================================="
 echo "==================================================="
-echo "Downloading docker"
+msg="Downloading docker 2/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -55,7 +65,8 @@ apt-get update
 # PHP + MariaDB + Redis + NGINX
 echo "==================================================="
 echo "==================================================="
-echo "Downloading php, redis and nginx."
+msg="Downloading php, redis and nginx. 3/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -71,7 +82,8 @@ systemctl restart php8.3-fpm
 # # GRUB swap accounting
 echo "==================================================="
 echo "==================================================="
-echo "setting up grub swap accounting"
+msg="setting up grub swap accounting 4/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -83,7 +95,8 @@ debuginfo "GRUB swap accounting" $?
 # Composer
 echo "==================================================="
 echo "==================================================="
-echo "Starting composer setup."
+msg="Starting composer setup. 5/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -95,7 +108,8 @@ debuginfo "Composer" $?
 # Pterodactyl panel
 echo "==================================================="
 echo "==================================================="
-echo "Setting up Ptero Panel."
+msg="Setting up Ptero Panel. 6/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -112,7 +126,8 @@ debuginfo "Permissions for pterodactyl" $?
 # MariaDB setup
 echo "==================================================="
 echo "==================================================="
-echo "Setting up mariadb."
+msg="Setting up mariadb. 7/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -127,10 +142,20 @@ FLUSH PRIVILEGES;"
 
 debuginfo "MariaDB" $?
 
+# Secure MariaDB
+mysql -e "
+ALTER USER 'root'@'localhost' IDENTIFIED BY 'replace_db_password';
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+FLUSH PRIVILEGES;"
+
 # Laravel setup
 echo "==================================================="
 echo "==================================================="
-echo "Setting up Laravel."
+msg="Setting up Laravel. 8/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -189,7 +214,8 @@ chown -R www-data:www-data /var/www/pterodactyl
 # Cron
 echo "==================================================="
 echo "==================================================="
-echo "Making the cron job for pterodactyl."
+msg="Making the cron job for pterodactyl. 9/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -200,7 +226,8 @@ debuginfo "Cron job" $?
 # pteroq service
 echo "==================================================="
 echo "==================================================="
-echo "Creating pteroq systemd service"
+msg="Creating pteroq systemd service 10/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -230,7 +257,8 @@ systemctl enable --now pteroq.service
 # Setting up the webpage access aka NGINX
 echo "==================================================="
 echo "==================================================="
-echo "Setting up NGINX"
+msg="Setting up NGINX 11/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -292,7 +320,8 @@ systemctl restart nginx
 # Wings
 echo "==================================================="
 echo "==================================================="
-echo "Creating wings"
+msg="Creating wings 12/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -340,7 +369,8 @@ debuginfo "Wing systemd service" $?
 # Firewall configuration
 echo "==================================================="
 echo "==================================================="
-echo "Setting up firewall rules"
+msg="Setting up firewall rules 13/14"
+finish_message "$msg"
 echo "==================================================="
 echo "==================================================="
 
@@ -368,16 +398,12 @@ ufw --force enable
 systemctl enable --now wings
 systemctl disable postinstall.service
 
-finish_message() {
-  local msg="
+msg="
 ===================================================
 ===================================================
-The provisioning script of pterodactyl has run it's course to the end.
+The provisioning script of pterodactyl has run it's course to the end. 14/14
 ===================================================
 ===================================================
 "
-  echo "$msg"
-  echo "$msg" > /dev/tty1
-}
 
-finish_message
+finish_message "$msg"

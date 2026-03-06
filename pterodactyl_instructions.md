@@ -1,6 +1,6 @@
 # Using pterodactyl
 ###############################################################
-###                 Terminology                           ###
+###                 Terminology                            ###
 ###############################################################
 
 Panel — This refers to Pterodactyl Panel itself, and is what allows you to add additional nodes and servers to the system.

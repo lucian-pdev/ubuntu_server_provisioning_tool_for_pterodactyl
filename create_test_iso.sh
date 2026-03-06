@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ============================================================
+# This script must run with root privileges.
+# ISO extraction produces root-owned, read-only files, and
+# modifying them requires elevated permissions.
+# ============================================================
+
+if [[ $EUID -ne 0 ]]; then
+    echo "This script must be run with sudo or as root."
+    echo "Example: sudo ./create_iso.sh"
+    exit 1
+fi
+
+
 #############################################
 # CONFIGURATION
 #############################################
@@ -10,7 +23,7 @@ output_path="$BASE_DIR/final_iso"
 starting_path="$BASE_DIR/final_iso/original_copied_in_here_for_modding"
 backup_location="$BASE_DIR/unpacked-starting_iso/Ubuntu_server"
 branches_path="$BASE_DIR/branches"
-filename_prefix="ubuntu_test_"
+filename_prefix="pterodactyl_ubuntu_test_"
 
 #############################################
 # FUNCTION: Select branch
@@ -48,6 +61,42 @@ choice_fun() {
 }
 
 #############################################
+# FUNCTION: Sanitize hostname
+#############################################
+
+sanitize_hostname() {
+    # Lowercase, alphanumeric and hyphens only, max 63 chars, no leading/trailing hyphen
+    # RFC 1123 compliant: a-z, 0-9, hyphen; cannot start/end with hyphen
+    local name="$1"
+    
+    # Lowercase
+    name=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
+    
+    # Keep only alphanumeric and hyphens
+    name=$(printf '%s' "$name" | tr -cd '[:alnum:]-')
+    
+    # Remove leading hyphens
+    while [[ "$name" == -* ]]; do
+        name="${name#-}"
+    done
+    
+    # Remove trailing hyphens
+    while [[ "$name" == *- ]]; do
+        name="${name%-}"
+    done
+    
+    # Truncate to 63 characters (RFC 1123 limit)
+    name="${name:0:63}"
+    
+    # Fallback if empty or only hyphens were provided
+    if [[ -z "$name" ]]; then
+        name="ubuntu"
+    fi
+    
+    printf '%s' "$name"
+}
+
+#############################################
 # FUNCTION: Collect user credentials
 #############################################
 
@@ -60,10 +109,21 @@ collect_credentials() {
     read -rsp "Panel admin password: " panel_pass; echo
     read -rsp "Database password: " db_pass; echo
 
-    # Export so sed can use them easily
-    export panel_email panel_user panel_pass db_pass
-}
+    # Validate inputs aren't empty
+    [[ -z "$panel_email" ]] && { echo "Email cannot be empty"; exit 1; }
+    [[ -z "$panel_user" ]] && { echo "Username cannot be empty"; exit 1; }
+    [[ -z "$panel_pass" ]] && { echo "Panel password cannot be empty"; exit 1; }
+    [[ -z "$db_pass" ]] && { echo "Database password cannot be empty"; exit 1; }
 
+    # Hash the panel password for system user (Ubuntu-compatible SHA-512)
+    hashed_user_pass=$(mkpasswd -m sha-512 "$panel_pass")
+    
+    # Generate sanitized hostname from username
+    safe_hostname=$(sanitize_hostname "$panel_user")
+
+    # Export all values for sed replacement 
+    export panel_email panel_user panel_pass db_pass hashed_user_pass safe_hostname
+}
 
 #############################################
 # FUNCTION: Determine next build number
@@ -72,6 +132,7 @@ collect_credentials() {
 next_build_number() {
     mkdir -p "$output_path"
 
+    # shellcheck disable=SC2010
     mapfile -t existing < <(ls -1 "$output_path" | grep -E '^[0-9]{4}$' || true)
 
     if [[ ${#existing[@]} -eq 0 ]]; then
@@ -125,14 +186,20 @@ extract_iso() {
     echo "Using ISO: $(basename "$selected_iso")"
     echo "Extracting ISO to: $backup_location"
 
-    rm -rf "$backup_location"
+    # ensure parent dir and old contents are writable and removable 
+    parent_dir="$(dirname "$backup_location")" 
+    mkdir -p "$parent_dir" 
+    rm -rf "$backup_location" 
     mkdir -p "$backup_location"
 
+    #old line
+    # xorriso -osirrox on -indev "$selected_iso" -extract / "$backup_location"
+
+    # extract ISO with permissive flags so files are owned/writable by current user
     xorriso -osirrox on -indev "$selected_iso" -extract / "$backup_location"
 
     echo "ISO extraction complete."
 }
-
 
 #############################################
 # FUNCTION: Prepare working directory
@@ -164,18 +231,33 @@ inject_files() {
 }
 
 #############################################
-# FUNCTION: Replace placeholders in provision.sh
+# FUNCTION: Replace placeholders in provision.sh and user-data
 #############################################
 
 replace_placeholders() {
     local prov="$starting_path/postinstall/provision.sh"
+    local userdata="$starting_path/autoinstall/user-data"
+
+    # Verify files exist
+    [[ -f "$prov" ]] || { echo "ERROR: provision.sh not found at $prov"; exit 1; }
+    [[ -f "$userdata" ]] || { echo "ERROR: user-data not found at $userdata"; exit 1; }
 
     echo "Replacing placeholders in provision.sh..."
 
-    sed -i "s|replace_panel_email|$panel_email|g" "$prov"
-    sed -i "s|replace_panel_username|$panel_user|g" "$prov"
-    sed -i "s|replace_panel_password|$panel_pass|g" "$prov"
-    sed -i "s|replace_db_password|$db_pass|g" "$prov"
+    sed -i "s|replace_panel_email|${panel_email//|/\\|}|g" "$prov"
+    sed -i "s|replace_panel_username|${panel_user//|/\\|}|g" "$prov"
+    sed -i "s|replace_panel_password|${panel_pass//|/\\|}|g" "$prov"
+    sed -i "s|replace_db_password|${db_pass//|/\\|}|g" "$prov"
+
+    echo "Replacing placeholders in user-data..."
+
+    sed -i "s|replace_me_hostname|${safe_hostname//|/\\|}|g" "$userdata"
+    sed -i "s|replace_me_username|${panel_user//|/\\|}|g" "$userdata"
+    sed -i "s|replace_me_password|${hashed_user_pass//|/\\|}|g" "$userdata"
+
+    echo "Placeholder replacement complete."
+    echo "  Hostname: $safe_hostname"
+    echo "  Username: $panel_user"
 }
 
 
@@ -187,7 +269,11 @@ patch_grub() {
     echo "Patching GRUB..."
 
     for grubfile in "$starting_path/boot/grub/grub.cfg" "$starting_path/boot/grub/loopback.cfg"; do
-        sed -i 's|linux\s\+/casper/vmlinuz|linux /casper/vmlinuz quiet autoinstall ds=nocloud\\;s=/cdrom/autoinstall/|' "$grubfile"
+        if [[ -f "$grubfile" ]]; then
+            sed -i 's|linux\s\+/casper/vmlinuz|linux /casper/vmlinuz quiet autoinstall ds=nocloud\\;s=/cdrom/autoinstall/|' "$grubfile"
+        else
+            echo "WARNING: $grubfile not found, skipping GRUB patch"
+        fi
     done
 }
 
@@ -225,6 +311,17 @@ archive_branch() {
 }
 
 #############################################
+# FUNCTION: Cleanup files
+#############################################
+
+cleanup_iso_files() {
+    rm -rf "$starting_path"
+    rm -rf "$backup_location"
+
+    echo "Cleaned up excess files."
+}
+
+#############################################
 # MAIN SCRIPT
 #############################################
 
@@ -238,6 +335,7 @@ replace_placeholders
 patch_grub
 build_iso
 archive_branch
+cleanup_iso_files
 
 echo
 echo "Build complete."
